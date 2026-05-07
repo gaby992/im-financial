@@ -78,9 +78,13 @@ function parseQBDetail(rows: string[][]): ParsedCategory[] {
     // ── Total row for current category — extract total, skip ─────────────────
     if (/^total /i.test(colA)) {
       const amt = parseAmount(cells);
-      if (currentCategory && amt !== null) currentCategory.total = amt;
-      categories.push(currentCategory!);
-      currentCategory = null;
+      if (currentCategory) {
+        if (amt !== null) currentCategory.total = amt;
+        if (currentCategory.transactions.length > 0 || currentCategory.total > 0) {
+          categories.push(currentCategory);
+        }
+        currentCategory = null;
+      }
       continue;
     }
 
