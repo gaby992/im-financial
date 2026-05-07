@@ -21,8 +21,12 @@ const USERS_LIST = [
 export default function SettingsPage() {
   const { user } = useApp();
   const [uploads, setUploads] = useState(UPLOADS);
-  const [provider, setProvider] = useState<'claude'|'openai'>('claude');
-  const [apiKey, setApiKey] = useState('');
+  const [provider, setProvider] = useState<'claude'|'openai'>(() =>
+    (typeof window !== 'undefined' ? localStorage.getItem('ai_provider') : null) as 'openai'|'claude' ?? 'openai'
+  );
+  const [apiKey, setApiKey] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('ai_key') ?? '' : ''
+  );
   const [keySaved, setKeySaved] = useState(false);
 
   const isAdmin = user?.role === 'admin';
@@ -34,8 +38,10 @@ export default function SettingsPage() {
   };
 
   const handleSaveKey = () => {
+    localStorage.setItem('ai_provider', provider);
+    localStorage.setItem('ai_key', apiKey);
     setKeySaved(true);
-    setTimeout(() => setKeySaved(false), 2000);
+    setTimeout(() => setKeySaved(false), 2500);
   };
 
   const badgeClass = (c: Company) =>
