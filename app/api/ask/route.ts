@@ -43,7 +43,13 @@ export async function POST(req: NextRequest) {
     if (!question?.trim()) {
       return NextResponse.json({ error: 'No question provided' }, { status: 400 });
     }
-    if (!apiKey?.trim()) {
+
+    // Use client-provided key OR fall back to server-side env var
+    const resolvedKey = apiKey?.trim() || (provider === 'openai'
+      ? process.env.OPENAI_API_KEY
+      : process.env.ANTHROPIC_API_KEY);
+
+    if (!resolvedKey) {
       return NextResponse.json({ error: 'No API key — add it in Settings first.' }, { status: 400 });
     }
 
@@ -61,7 +67,7 @@ ${context}`;
     if (provider === 'openai') {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${resolvedKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: 'gpt-4o',
           messages: [
@@ -84,7 +90,7 @@ ${context}`;
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
-          'x-api-key': apiKey,
+          'x-api-key': resolvedKey,
           'anthropic-version': '2023-06-01',
           'Content-Type': 'application/json',
         },

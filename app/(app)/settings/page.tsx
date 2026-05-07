@@ -5,13 +5,8 @@ import { formatCurrency, COMPANIES } from '@/lib/utils';
 import { Trash2, Users, Key, Bot, CheckCircle } from 'lucide-react';
 import { Company } from '@/types';
 
-// Placeholder upload history
-const UPLOADS = [
-  { id:'1', company:'IM'  as const, period:'April 2026',    filename:'IM_PL_Apr26.xlsx',       uploaded:'2026-05-01', by:'gabby', rows:312 },
-  { id:'2', company:'WSH' as const, period:'April 2026',    filename:'WSH_PL_Apr26.xlsx',      uploaded:'2026-05-01', by:'gabby', rows:145 },
-  { id:'3', company:'IM'  as const, period:'March 2026',    filename:'IM_PL_Mar26.xlsx',       uploaded:'2026-04-02', by:'gabby', rows:298 },
-  { id:'4', company:'Abundant' as const, period:'March 2026', filename:'Abundant_PL_Mar26.xlsx', uploaded:'2026-04-02', by:'gabby', rows:88 },
-];
+// Upload history — starts empty; populated via real uploads to Supabase
+const UPLOADS: { id:string; company: 'IM'|'WSH'|'Abundant'; period:string; filename:string; uploaded:string; by:string; rows:number }[] = [];
 
 const USERS_LIST = [
   { username:'gabby',   role:'admin',  access:'Full access — upload, manage, insights' },
