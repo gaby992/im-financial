@@ -2,33 +2,16 @@
 import { useState } from 'react';
 import { useApp } from '@/lib/context';
 import { Lightbulb, Send, TrendingDown, TrendingUp, Loader2, AlertCircle } from 'lucide-react';
-import { IM_SUMMARY, IM_EXPENSES } from '@/lib/im-data';
-import { WSH_SUMMARY } from '@/lib/wsh-data';
-import { ABUNDANT_SUMMARY } from '@/lib/abundant-data';
 import { formatCurrency } from '@/lib/utils';
 import { COMPANIES } from '@/lib/utils';
 
 interface QA { id: string; question: string; answer: string; by: string; time: string; }
 
-function getSummaryCards(company: string) {
-  if (company === 'WSH') return [
-    { icon: TrendingUp,   label: 'Net P&L — Q1 2026',       value: `+${formatCurrency(WSH_SUMMARY.netPL)} (${WSH_SUMMARY.margin}% margin)`, color: '#10B981' },
-    { icon: TrendingDown, label: 'Total Payroll — Q1 2026',   value: `${formatCurrency(42067.19)} wages + taxes`,                             color: '#F59E0B' },
-    { icon: Lightbulb,    label: 'Insight',                   value: 'REI Group pays $12,500 bi-monthly — consistent income',                  color: '#8B5CF6' },
-  ];
-  if (company === 'Abundant') return [
-    { icon: TrendingDown, label: 'Total Disbursements Q1',    value: formatCurrency(ABUNDANT_SUMMARY.totalExpenses),   color: '#F43F5E' },
-    { icon: TrendingDown, label: 'Largest Item — Q1 2026',    value: 'Mortgage 140 Cove: $12,628.47',                  color: '#3B82F6' },
-    { icon: Lightbulb,    label: 'Trust Note',                value: 'Abundant is a Trust — no operating income generated', color: '#8B5CF6' },
-  ];
-  // IM default
-  const topExpense = [...IM_EXPENSES].sort((a,b) => b.total.IM - a.total.IM)[0];
-  return [
-    { icon: TrendingUp,   label: 'Net P&L — Jan–Apr 2026',   value: `+${formatCurrency(IM_SUMMARY.netPL)} (${IM_SUMMARY.margin}% margin)`, color: '#10B981' },
-    { icon: TrendingDown, label: 'Top Expense Category',      value: `${topExpense.category}: ${formatCurrency(topExpense.total.IM)}`,        color: '#F59E0B' },
-    { icon: Lightbulb,    label: 'AI Insight',                value: 'Software subscriptions grew ~15% vs prior period', color: '#8B5CF6' },
-  ];
-}
+const STATIC_CARDS = [
+  { icon: TrendingUp,   label: 'AI Financial Assistant', value: 'Ask questions about your uploaded QB data', color: '#10B981' },
+  { icon: Lightbulb,    label: 'Powered by GPT-4o',      value: 'Answers based on real transaction data',  color: '#8B5CF6' },
+  { icon: TrendingDown, label: 'Multi-company',           value: 'Switch companies using the filter above', color: '#0EA5E9' },
+];
 
 export default function InsightsPage() {
   const { user, company } = useApp();
@@ -37,7 +20,7 @@ export default function InsightsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const summaryCards = getSummaryCards(company);
+  const summaryCards = STATIC_CARDS;
   const companyLabel = company === 'All' ? 'All Companies' : COMPANIES[company as keyof typeof COMPANIES]?.name ?? company;
 
   const handleAsk = async (e: React.FormEvent) => {
@@ -48,15 +31,9 @@ export default function InsightsPage() {
     setLoading(true);
     setError('');
 
-    // Get saved settings from localStorage
     const savedProvider = localStorage.getItem('ai_provider') ?? 'openai';
     const savedKey      = localStorage.getItem('ai_key') ?? '';
-
-    if (!savedKey) {
-      setError('No API key configured. Go to Settings → AI Provider to add your key.');
-      setLoading(false);
-      return;
-    }
+    // Note: server uses OPENAI_API_KEY env var if no client key provided
 
     try {
       const res = await fetch('/api/ask', {

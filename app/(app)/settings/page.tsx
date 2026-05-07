@@ -1,13 +1,10 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useApp } from '@/lib/context';
 import { formatCurrency, COMPANIES } from '@/lib/utils';
-import { Trash2, Users, Key, Bot, CheckCircle } from 'lucide-react';
-import { Company } from '@/types';
+import { Trash2, Users, Key, Bot, CheckCircle, RefreshCw } from 'lucide-react';
 
-// Upload history — starts empty; populated via real uploads to Supabase
-const UPLOADS: { id:string; company: 'IM'|'WSH'|'Abundant'; period:string; filename:string; uploaded:string; by:string; rows:number }[] = [];
-
+interface Batch { id: string; company_code: string; period_label: string; filename: string; row_count: number; uploaded_by: string; created_at: string; }
 const USERS_LIST = [
   { username:'gabby',   role:'admin',  access:'Full access — upload, manage, insights' },
   { username:'chelsea', role:'viewer', access:'View all + post questions in Insights' },
@@ -15,21 +12,27 @@ const USERS_LIST = [
 
 export default function SettingsPage() {
   const { user } = useApp();
-  const [uploads, setUploads] = useState(UPLOADS);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState<'claude'|'openai'>(() =>
     (typeof window !== 'undefined' ? localStorage.getItem('ai_provider') : null) as 'openai'|'claude' ?? 'openai'
   );
-  const [apiKey, setApiKey] = useState(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('ai_key') ?? '' : ''
-  );
+  const [apiKey, setApiKey] = useState(() => typeof window !== 'undefined' ? localStorage.getItem('ai_key') ?? '' : '');
   const [keySaved, setKeySaved] = useState(false);
-
   const isAdmin = user?.role === 'admin';
 
-  const handleDelete = (id: string) => {
-    if (confirm('Delete this upload? All P&L data for this period and company will be removed.')) {
-      setUploads(prev => prev.filter(u => u.id !== id));
-    }
+  const loadBatches = () => {
+    setLoading(true);
+    fetch('/api/data?company=All&batches=1').then(r => r.json())
+      .then(d => { setBatches(d.batches ?? []); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+  useEffect(() => { loadBatches(); }, []);
+
+  const handleDelete = async (id: string, label: string) => {
+    if (!confirm(`Delete "${label}"? All data for this period will be removed.`)) return;
+    await fetch(`/api/data?batchId=${id}`, { method: 'DELETE' });
+    setBatches(prev => prev.filter(b => b.id !== id));
   };
 
   const handleSaveKey = () => {
@@ -39,8 +42,7 @@ export default function SettingsPage() {
     setTimeout(() => setKeySaved(false), 2500);
   };
 
-  const badgeClass = (c: Company) =>
-    c==='IM' ? 'badge-im' : c==='WSH' ? 'badge-wsh' : 'badge-abundant';
+  const badge = (c: string) => c==='IM' ? 'badge-im' : c==='WSH' ? 'badge-wsh' : 'badge-abundant';
 
   return (
     <div className="max-w-3xl space-y-8 animate-slide-up">
@@ -49,75 +51,48 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-500 mt-0.5">Manage uploads, users, and AI configuration</p>
       </div>
 
-      {/* Upload History */}
       <section className="card overflow-hidden">
-        <div className="px-5 py-4 border-b border-bg-border flex items-center gap-2">
-          <div className="w-5 h-5 rounded flex items-center justify-center bg-brand-cyan/10">
+        <div className="px-5 py-4 border-b border-bg-border flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-brand-cyan" />
+            <p className="font-semibold text-white">Upload History</p>
           </div>
-          <p className="font-semibold text-white">Upload History</p>
+          <button onClick={loadBatches} className="text-slate-500 hover:text-white transition-colors">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
         <table className="data-table w-full">
-          <thead>
-            <tr className="bg-bg-hover">
-              <th>Company</th>
-              <th>Period</th>
-              <th>Filename</th>
-              <th className="text-right">Rows</th>
-              <th>Uploaded</th>
-              <th>By</th>
-              {isAdmin && <th />}
-            </tr>
-          </thead>
+          <thead><tr className="bg-bg-hover"><th>Company</th><th>Period</th><th>Filename</th><th className="text-right">Rows</th><th>Uploaded</th><th>By</th>{isAdmin && <th />}</tr></thead>
           <tbody>
-            {uploads.map(u => (
-              <tr key={u.id} className="hover:bg-bg-hover/50 transition-colors">
-                <td><span className={`company-badge ${badgeClass(u.company)}`}>{u.company}</span></td>
-                <td className="text-slate-300">{u.period}</td>
-                <td className="text-slate-500 text-xs font-mono max-w-[200px] truncate">{u.filename}</td>
-                <td className="text-right font-mono text-sm text-slate-300">{u.rows}</td>
-                <td className="text-slate-500 text-sm">{u.uploaded}</td>
-                <td className="text-slate-400 text-sm">{u.by}</td>
-                {isAdmin && (
-                  <td>
-                    <button onClick={() => handleDelete(u.id)}
-                      className="text-slate-600 hover:text-negative transition-colors p-1">
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                )}
+            {batches.map(b => (
+              <tr key={b.id} className="hover:bg-bg-hover/50 transition-colors">
+                <td><span className={`company-badge ${badge(b.company_code)}`}>{b.company_code}</span></td>
+                <td className="text-slate-300">{b.period_label}</td>
+                <td className="text-slate-500 text-xs font-mono max-w-[180px] truncate">{b.filename}</td>
+                <td className="text-right font-mono text-sm text-slate-300">{b.row_count}</td>
+                <td className="text-slate-500 text-sm">{new Date(b.created_at).toLocaleDateString('en-US')}</td>
+                <td className="text-slate-400 text-sm">{b.uploaded_by}</td>
+                {isAdmin && <td><button onClick={() => handleDelete(b.id, b.period_label)} className="text-slate-600 hover:text-negative transition-colors p-1"><Trash2 size={14} /></button></td>}
               </tr>
             ))}
-            {!uploads.length && (
-              <tr><td colSpan={7} className="text-center text-slate-600 py-8">No uploads yet</td></tr>
-            )}
+            {!loading && !batches.length && <tr><td colSpan={7} className="text-center text-slate-600 py-8">No uploads yet</td></tr>}
+            {loading && <tr><td colSpan={7} className="text-center text-slate-700 py-6">Loading…</td></tr>}
           </tbody>
         </table>
       </section>
 
-      {/* Users */}
       <section className="card overflow-hidden">
         <div className="px-5 py-4 border-b border-bg-border flex items-center gap-2">
           <Users size={16} className="text-brand-violet" />
           <p className="font-semibold text-white">Users</p>
         </div>
         <table className="data-table w-full">
-          <thead>
-            <tr className="bg-bg-hover">
-              <th>Username</th>
-              <th>Role</th>
-              <th>Access</th>
-            </tr>
-          </thead>
+          <thead><tr className="bg-bg-hover"><th>Username</th><th>Role</th><th>Access</th></tr></thead>
           <tbody>
             {USERS_LIST.map(u => (
               <tr key={u.username} className="hover:bg-bg-hover/50 transition-colors">
                 <td className="font-medium text-white">{u.username}</td>
-                <td>
-                  <span className={`company-badge ${u.role==='admin' ? 'badge-im' : 'badge-abundant'}`}>
-                    {u.role}
-                  </span>
-                </td>
+                <td><span className={`company-badge ${u.role==='admin' ? 'badge-im' : 'badge-abundant'}`}>{u.role}</span></td>
                 <td className="text-slate-500 text-sm">{u.access}</td>
               </tr>
             ))}
@@ -125,29 +100,23 @@ export default function SettingsPage() {
         </table>
       </section>
 
-      {/* AI Provider */}
       {isAdmin && (
         <section className="card p-5 space-y-4">
-          <div className="flex items-center gap-2">
-            <Bot size={16} className="text-brand-pink" />
-            <p className="font-semibold text-white">AI Provider</p>
-          </div>
+          <div className="flex items-center gap-2"><Bot size={16} className="text-brand-pink" /><p className="font-semibold text-white">AI Provider</p></div>
           <div className="flex gap-2">
-            {(['claude','openai'] as const).map(p => (
-              <button key={p} onClick={() => setProvider(p)}
-                className="px-4 py-2 rounded-lg text-sm font-semibold border transition-all capitalize"
-                style={provider===p
-                  ? { background: 'rgba(139,92,246,0.15)', color:'#8B5CF6', borderColor:'rgba(139,92,246,0.4)' }
-                  : { background:'transparent', color:'#64748B', borderColor:'rgba(255,255,255,0.07)' }}>
+            {(['openai','claude'] as const).map(p => (
+              <button key={p} onClick={() => setProvider(p)} className="px-4 py-2 rounded-lg text-sm font-semibold border transition-all"
+                style={provider===p ? { background:'rgba(139,92,246,0.15)', color:'#8B5CF6', borderColor:'rgba(139,92,246,0.4)' }
+                                    : { background:'transparent', color:'#64748B', borderColor:'rgba(255,255,255,0.07)' }}>
                 {p === 'claude' ? '✦ Claude' : '⬡ OpenAI'}
               </button>
             ))}
           </div>
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-slate-400 mb-1.5">API Key</label>
+              <label className="block text-xs text-slate-400 mb-1.5">API Key (optional — leave blank to use server default)</label>
               <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
-                placeholder="sk-ant-api… or sk-…"
+                placeholder="sk-… (optional, overrides server key)"
                 className="w-full bg-bg-base border border-bg-border rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-brand-violet transition-colors font-mono" />
             </div>
             <div className="flex items-end">
@@ -156,7 +125,7 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
-          <p className="text-xs text-slate-600">Key is stored securely in Supabase and never exposed to clients.</p>
+          <p className="text-xs text-slate-600">Leave blank to use the pre-configured server key. Each client can set their own for separate billing.</p>
         </section>
       )}
     </div>

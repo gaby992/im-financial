@@ -1,274 +1,140 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useApp } from '@/lib/context';
-import { PLGroup, Company } from '@/types';
 import { formatCurrency, COMPANIES } from '@/lib/utils';
-import { IM_EXPENSES, IM_INCOME } from '@/lib/im-data';
-import { Download, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, Upload } from 'lucide-react';
 
-// Combine income + expenses into P&L sections
-const INCOME_GROUPS: PLGroup[] = IM_INCOME.map(g => ({
-  category: g.category,
-  color: g.color,
-  total: { IM: g.total.IM, WSH: g.total.WSH, Abundant: g.total.Abundant },
-  items: g.items,
-}));
-
-const EXPENSE_GROUPS: PLGroup[] = IM_EXPENSES.map(g => ({
-  category: g.category,
-  color: g.color,
-  total: { IM: g.total.IM, WSH: g.total.WSH, Abundant: g.total.Abundant },
-  items: g.items,
-}));
-
-function DrillDrawer({ group, onClose }: { group: PLGroup; onClose: () => void }) {
-  const totalIM = group.total.IM + group.total.WSH + group.total.Abundant;
-  return (
-    <>
-      <div className="drawer-overlay" onClick={onClose} />
-      <div className="drawer p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <span className="inline-block w-3 h-3 rounded-full mr-2" style={{ background: group.color }} />
-            <span className="text-lg font-bold text-white">{group.category}</span>
-          </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={18} /></button>
-        </div>
-
-        <div className="mb-4 p-3 rounded-lg border" style={{ background: group.color + '10', borderColor: group.color + '30' }}>
-          <p className="text-xs text-slate-400">Total · Jan–Apr 2026</p>
-          <p className="text-2xl font-bold" style={{ color: group.color }}>{formatCurrency(totalIM)}</p>
-        </div>
-
-        <table className="data-table w-full">
-          <thead>
-            <tr>
-              <th className="text-left">Description</th>
-              <th className="text-right">IM</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(group.items ?? []).map((e, i) => (
-              <tr key={i} className="hover:bg-bg-hover transition-colors">
-                <td className="text-slate-300">{e.description}</td>
-                <td className="text-right font-mono text-sm text-white">{formatCurrency(e.amount.IM)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-function PLSection({
-  title, groups, isAll, companies, openDrawer, setOpenDrawer, collapsed, setCollapsed, isIncome
-}: {
-  title: string; groups: PLGroup[]; isAll: boolean;
-  companies: Exclude<Company,'All'>[];
-  openDrawer: PLGroup | null; setOpenDrawer: (g: PLGroup | null) => void;
-  collapsed: Record<string, boolean>; setCollapsed: (fn: (p: Record<string,boolean>) => Record<string,boolean>) => void;
-  isIncome?: boolean;
-}) {
-  const sectionTotal = groups.reduce((s, g) => s + g.total.IM + g.total.WSH + g.total.Abundant, 0);
-  const color = isIncome ? '#10B981' : '#F43F5E';
-
-  return (
-    <>
-      {/* Section header */}
-      <tr className="bg-bg-base">
-        <td colSpan={isAll ? 5 : 2} className="py-2 px-4">
-          <span className="text-xs font-bold uppercase tracking-widest" style={{ color }}>
-            {title}
-          </span>
-        </td>
-      </tr>
-
-      {groups.map(group => {
-        const isCollapsed = collapsed[group.category];
-        const groupTotal = group.total.IM + group.total.WSH + group.total.Abundant;
-        return (
-          <>
-            {/* Category row */}
-            <tr key={group.category + '-hdr'}
-                className="border-t cursor-pointer hover:bg-bg-hover transition-colors"
-                style={{ borderColor: group.color + '30' }}
-                onClick={() => setCollapsed(prev => ({ ...prev, [group.category]: !prev[group.category] }))}>
-              <td className="py-3 px-4">
-                <span className="flex items-center gap-2 font-semibold text-white">
-                  {isCollapsed ? <ChevronRight size={14} style={{ color: group.color }} /> : <ChevronDown size={14} style={{ color: group.color }} />}
-                  <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: group.color }} />
-                  {group.category}
-                </span>
-              </td>
-              {isAll ? (
-                <>
-                  {companies.map(c => (
-                    <td key={c} className="text-right py-3 px-4 font-mono text-sm text-slate-400">
-                      {group.total[c] ? formatCurrency(group.total[c]) : '—'}
-                    </td>
-                  ))}
-                  <td className="text-right py-3 px-4 font-bold font-mono" style={{ color: group.color }}>
-                    {formatCurrency(groupTotal)}
-                  </td>
-                </>
-              ) : (
-                <td className="text-right py-3 px-4 font-bold font-mono" style={{ color: group.color }}>
-                  {formatCurrency(group.total.IM)}
-                </td>
-              )}
-            </tr>
-
-            {/* Line items */}
-            {!isCollapsed && (group.items ?? []).map((entry, i) => (
-              <tr key={i} className="hover:bg-bg-hover/40 transition-colors">
-                <td className="py-2 px-4 pl-12 text-slate-400 text-sm">{entry.description}</td>
-                {isAll ? (
-                  <>
-                    <td colSpan={3} />
-                    <td className="text-right py-2 px-4 text-sm font-mono text-slate-300">
-                      {formatCurrency(entry.amount.IM)}
-                    </td>
-                  </>
-                ) : (
-                  <td className="text-right py-2 px-4 text-sm font-mono text-slate-300">
-                    {formatCurrency(entry.amount.IM)}
-                  </td>
-                )}
-              </tr>
-            ))}
-
-            {/* Total row — clickable */}
-            <tr key={group.category + '-total'}
-                className="hover:bg-bg-hover transition-colors cursor-pointer"
-                onClick={() => setOpenDrawer(group)}>
-              <td className="py-2 px-4 pl-12 text-xs font-bold uppercase tracking-wider"
-                  style={{ color: group.color }}>
-                Total {group.category} ↗
-              </td>
-              {isAll ? (
-                <>
-                  {companies.map(c => (
-                    <td key={c} className="text-right py-2 px-4 font-bold font-mono text-sm" style={{ color: group.color }}>
-                      {group.total[c] ? formatCurrency(group.total[c]) : '—'}
-                    </td>
-                  ))}
-                  <td className="text-right py-2 px-4 font-bold font-mono text-sm" style={{ color: group.color }}>
-                    {formatCurrency(groupTotal)}
-                  </td>
-                </>
-              ) : (
-                <td className="text-right py-2 px-4 font-bold font-mono text-sm" style={{ color: group.color }}>
-                  {formatCurrency(group.total.IM)}
-                </td>
-              )}
-            </tr>
-          </>
-        );
-      })}
-
-      {/* Section total */}
-      <tr style={{ background: color + '08', borderTop: `2px solid ${color}30` }}>
-        <td className="py-3 px-4 font-bold text-sm" style={{ color }}>
-          Total {title}
-        </td>
-        {isAll ? (
-          <>
-            {companies.map(c => (
-              <td key={c} className="text-right py-3 px-4 font-bold font-mono" style={{ color }}>
-                {formatCurrency(groups.reduce((s, g) => s + (g.total[c] ?? 0), 0))}
-              </td>
-            ))}
-            <td className="text-right py-3 px-4 font-bold font-mono text-base" style={{ color }}>
-              {formatCurrency(sectionTotal)}
-            </td>
-          </>
-        ) : (
-          <td className="text-right py-3 px-4 font-bold font-mono text-base" style={{ color }}>
-            {formatCurrency(groups.reduce((s, g) => s + g.total.IM, 0))}
-          </td>
-        )}
-      </tr>
-    </>
-  );
-}
+interface Category { category: string; type: string; total: number; transactions: { name: string; amount: number }[]; }
+interface Summary { totalIncome: number; totalExpenses: number; netPL: number; margin: number; }
 
 export default function PLPage() {
   const { company } = useApp();
-  const [openDrawer, setOpenDrawer] = useState<PLGroup | null>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const isAll = company === 'All';
-  const companies: Exclude<Company,'All'>[] = ['IM', 'WSH', 'Abundant'];
+  const [data,      setData]      = useState<{ hasData: boolean; summary: Summary | null; categories: Category[] } | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [expanded,  setExpanded]  = useState<Set<string>>(new Set());
 
-  const totalIncome   = INCOME_GROUPS.reduce((s, g) => s + g.total.IM, 0);
-  const totalExpenses = EXPENSE_GROUPS.reduce((s, g) => s + g.total.IM, 0);
-  const netPL         = totalIncome - totalExpenses;
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/data?company=${company}`)
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [company]);
+
+  const toggle = (cat: string) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(cat) ? s.delete(cat) : s.add(cat); return s; });
+
+  const companyLabel = company === 'All' ? 'All Companies' : COMPANIES[company as keyof typeof COMPANIES]?.name ?? company;
+
+  if (loading) return <div className="flex items-center justify-center h-64"><div className="w-8 h-8 border-2 border-brand-violet/30 border-t-brand-violet rounded-full animate-spin" /></div>;
+
+  if (!data?.hasData) return (
+    <div className="flex flex-col items-center justify-center py-32 space-y-5">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#0EA5E9,#8B5CF6)' }}>
+        <Upload size={28} className="text-white" />
+      </div>
+      <div className="text-center">
+        <h2 className="text-xl font-bold text-white">No data for {companyLabel}</h2>
+        <p className="text-slate-500 text-sm mt-1">Upload a QuickBooks P&L file to see your P&L detail here.</p>
+      </div>
+      <Link href="/upload" className="btn-primary px-6 py-2.5 flex items-center gap-2 text-sm">
+        <Upload size={15} /> Upload Statement
+      </Link>
+    </div>
+  );
+
+  const { summary, categories } = data;
+  const incCats = categories.filter(c => c.type === 'income');
+  const expCats = categories.filter(c => c.type === 'expense');
 
   return (
     <div className="space-y-6 animate-slide-up">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">P&L Detail</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Interactive Marketing · Jan – Apr 2026</p>
+          <p className="text-sm text-slate-500 mt-0.5">{companyLabel}</p>
         </div>
-        <button className="btn-secondary flex items-center gap-2 text-xs">
-          <Download size={14} /> Export Excel
-        </button>
+        <span className="text-xs px-3 py-1 rounded-full border" style={{ background:'rgba(14,165,233,0.1)', color:'#0EA5E9', borderColor:'rgba(14,165,233,0.2)' }}>
+          {categories.length} categories · {categories.reduce((s,c) => s + c.transactions.length, 0)} transactions
+        </span>
       </div>
 
-      {/* Table */}
+      {/* Summary strip */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="kpi-card">
+          <p className="text-xs text-slate-500 uppercase tracking-wider">Total Income</p>
+          <p className="text-xl font-bold text-positive mt-1">{formatCurrency(summary?.totalIncome ?? 0)}</p>
+        </div>
+        <div className="kpi-card">
+          <p className="text-xs text-slate-500 uppercase tracking-wider">Total Expenses</p>
+          <p className="text-xl font-bold text-negative mt-1">{formatCurrency(summary?.totalExpenses ?? 0)}</p>
+        </div>
+        <div className="kpi-card">
+          <p className="text-xs text-slate-500 uppercase tracking-wider">Net P&L</p>
+          <p className={`text-xl font-bold mt-1 ${(summary?.netPL ?? 0) >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(summary?.netPL ?? 0)}</p>
+          <p className="text-xs text-slate-500">{summary?.margin ?? 0}% margin</p>
+        </div>
+      </div>
+
+      {/* Category table */}
       <div className="card overflow-hidden">
-        <table className="data-table w-full">
-          <thead>
-            <tr className="bg-bg-hover">
-              <th className="w-1/2 py-3">Category / Description</th>
-              {isAll ? (
-                <>
-                  {companies.map(c => (
-                    <th key={c} className="text-right py-3" style={{ color: COMPANIES[c].color }}>{c}</th>
-                  ))}
-                  <th className="text-right py-3">Total</th>
-                </>
-              ) : (
-                <th className="text-right py-3">Amount</th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            <PLSection title="INCOME" groups={INCOME_GROUPS} isIncome isAll={isAll}
-              companies={companies} openDrawer={openDrawer} setOpenDrawer={setOpenDrawer}
-              collapsed={collapsed} setCollapsed={setCollapsed} />
+        {/* INCOME */}
+        {incCats.length > 0 && (
+          <>
+            <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-positive bg-positive/5">Income</div>
+            {incCats.map(cat => <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />)}
+            <div className="flex justify-between px-4 py-3 font-bold text-sm border-t border-positive/20 bg-positive/5">
+              <span className="text-positive">Total Income</span>
+              <span className="text-positive font-mono">{formatCurrency(incCats.reduce((s,c) => s+c.total,0))}</span>
+            </div>
+          </>
+        )}
 
-            <PLSection title="EXPENSES" groups={EXPENSE_GROUPS} isAll={isAll}
-              companies={companies} openDrawer={openDrawer} setOpenDrawer={setOpenDrawer}
-              collapsed={collapsed} setCollapsed={setCollapsed} />
+        {/* EXPENSES */}
+        {expCats.length > 0 && (
+          <>
+            <div className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-negative bg-negative/5 border-t border-bg-border">Expenses</div>
+            {expCats.map(cat => <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />)}
+            <div className="flex justify-between px-4 py-3 font-bold text-sm border-t border-negative/20 bg-negative/5">
+              <span className="text-negative">Total Expenses</span>
+              <span className="text-negative font-mono">{formatCurrency(expCats.reduce((s,c) => s+c.total,0))}</span>
+            </div>
+          </>
+        )}
 
-            {/* Net P&L */}
-            <tr className="border-t-2 border-slate-600" style={{ background: '#0F0F1A' }}>
-              <td className="py-4 px-4 font-bold text-white text-base">NET P&L</td>
-              {isAll ? (
-                <>
-                  {companies.map(c => (
-                    <td key={c} className={`text-right py-4 px-4 font-bold font-mono text-base ${netPL >= 0 ? 'text-positive' : 'text-negative'}`}>
-                      {formatCurrency(netPL)}
-                    </td>
-                  ))}
-                  <td className={`text-right py-4 px-4 font-bold font-mono text-xl ${netPL >= 0 ? 'text-positive' : 'text-negative'}`}>
-                    {formatCurrency(netPL)}
-                  </td>
-                </>
-              ) : (
-                <td className={`text-right py-4 px-4 font-bold font-mono text-xl ${netPL >= 0 ? 'text-positive' : 'text-negative'}`}>
-                  {formatCurrency(netPL)}
-                </td>
-              )}
-            </tr>
-          </tbody>
-        </table>
+        {/* Net */}
+        <div className="flex justify-between px-4 py-4 border-t-2 border-slate-600" style={{ background:'#0F0F1A' }}>
+          <span className="font-bold text-white text-base">NET P&L</span>
+          <span className={`font-bold font-mono text-xl ${(summary?.netPL ?? 0) >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(summary?.netPL ?? 0)}</span>
+        </div>
       </div>
-
-      {openDrawer && <DrillDrawer group={openDrawer} onClose={() => setOpenDrawer(null)} />}
     </div>
+  );
+}
+
+function CategoryRow({ cat, expanded, onToggle }: { cat: Category; expanded: boolean; onToggle: () => void }) {
+  return (
+    <>
+      <button onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors border-b border-bg-border/50 text-left">
+        <div className="flex items-center gap-2">
+          {cat.transactions.length > 0
+            ? (expanded ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />)
+            : <span className="w-3" />}
+          <span className="text-sm font-medium text-white">{cat.category}</span>
+          <span className="text-xs text-slate-600">{cat.transactions.length} txn{cat.transactions.length !== 1 ? 's' : ''}</span>
+        </div>
+        <span className={`text-sm font-semibold tabular-nums ${cat.type === 'income' ? 'text-positive' : 'text-slate-300'}`}>
+          {formatCurrency(cat.total)}
+        </span>
+      </button>
+      {expanded && cat.transactions.map((tx, i) => (
+        <div key={i} className="flex items-center justify-between px-4 py-2 pl-10 border-b border-bg-border/30 bg-bg-base/30">
+          <span className="text-xs text-slate-400 truncate">{tx.name || '—'}</span>
+          <span className="text-xs font-mono text-slate-300 ml-4 flex-shrink-0">{formatCurrency(tx.amount)}</span>
+        </div>
+      ))}
+    </>
   );
 }
