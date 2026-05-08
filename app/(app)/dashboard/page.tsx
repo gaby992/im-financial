@@ -1,9 +1,9 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/lib/context';
-import { formatCurrency, formatPercent, COMPANIES } from '@/lib/utils';
-import { Upload, TrendingUp, TrendingDown } from 'lucide-react';
+import { formatCurrency, COMPANIES } from '@/lib/utils';
+import { Upload } from 'lucide-react';
 import {
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -12,43 +12,50 @@ import {
 interface Summary { totalIncome: number; totalExpenses: number; netPL: number; margin: number; }
 interface TrendItem { month: string; income: number; expenses: number; net: number; }
 interface BreakdownItem { name: string; value: number; color: string; }
-interface DashData { hasData: boolean; summary: Summary | null; trend: TrendItem[]; breakdown: BreakdownItem[]; }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+function buildApiUrl(company: string, dateFilter: any) {
+  const params = new URLSearchParams();
+  params.set('company', company);
+  if (company === 'All') params.set('mode', 'companies');
+  if (dateFilter.type === 'month')  params.set('period', `${dateFilter.year}-${String(dateFilter.month).padStart(2,'0')}`);
+  if (dateFilter.type === 'custom') { params.set('from', dateFilter.range.from); params.set('to', dateFilter.range.to); }
+  return `/api/data?${params}`;
+}
+
+const Tooltip_ = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
     <div className="card p-3 text-xs space-y-1">
       <p className="font-semibold text-slate-300">{label}</p>
-      {payload.map((p: any) => (
-        <p key={p.name} style={{ color: p.color }}>{p.name}: {formatCurrency(p.value)}</p>
-      ))}
+      {payload.map((p: any) => <p key={p.name} style={{ color: p.color }}>{p.name}: {formatCurrency(p.value)}</p>)}
     </div>
   );
 };
 
-function KPICard({ label, value, sub, positive, accent }: { label: string; value: string; sub?: string; positive?: boolean; accent?: string }) {
+function KPICard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <div className="kpi-card">
       <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
-      <p className={`text-2xl font-bold mt-1 ${positive === undefined ? 'text-white' : positive ? 'text-positive' : 'text-negative'}`}
-         style={accent ? { color: accent } : undefined}>{value}</p>
+      <p className="text-2xl font-bold mt-1" style={{ color: color ?? '#fff' }}>{value}</p>
       {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
     </div>
   );
 }
 
 export default function DashboardPage() {
-  const { company } = useApp();
-  const [data,    setData]    = useState<DashData | null>(null);
+  const { company, dateFilter } = useApp();
+  const [data,    setData]    = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true);
-    fetch(`/api/data?company=${company}`)
+    fetch(buildApiUrl(company, dateFilter))
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [company]);
+  }, [company, dateFilter]);
+
+  useEffect(() => { load(); }, [load]);
 
   const companyLabel = company === 'All' ? 'All Companies' : COMPANIES[company as keyof typeof COMPANIES]?.name ?? company;
 
@@ -60,8 +67,7 @@ export default function DashboardPage() {
 
   if (!data?.hasData) return (
     <div className="flex flex-col items-center justify-center py-32 space-y-5 animate-slide-up">
-      <div className="w-20 h-20 rounded-2xl flex items-center justify-center"
-           style={{ background: 'linear-gradient(135deg,#0EA5E9,#8B5CF6)' }}>
+      <div className="w-20 h-20 rounded-2xl flex items-center justify-center" style={{ background:'linear-gradient(135deg,#0EA5E9,#8B5CF6)' }}>
         <Upload size={32} className="text-white" />
       </div>
       <div className="text-center space-y-2">
@@ -74,8 +80,10 @@ export default function DashboardPage() {
     </div>
   );
 
-  const { summary, trend, breakdown } = data;
-  const isPositive = (summary?.netPL ?? 0) >= 0;
+  const summary  = data.summary as Summary;
+  const trend    = (data.trend ?? []) as TrendItem[];
+  const breakdown = (data.breakdown ?? []) as BreakdownItem[];
+  const isPos    = (summary?.netPL ?? 0) >= 0;
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -91,10 +99,10 @@ export default function DashboardPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-4">
-        <KPICard label="Total Income"   value={formatCurrency(summary?.totalIncome ?? 0)}   sub="Uploaded periods" />
-        <KPICard label="Total Expenses" value={formatCurrency(summary?.totalExpenses ?? 0)} sub="All categories" />
-        <KPICard label="Net P&L"        value={formatCurrency(summary?.netPL ?? 0)}         positive={isPositive} sub={`${summary?.margin ?? 0}% margin`} />
-        <KPICard label="P&L Margin"     value={`${summary?.margin ?? 0}%`}                  positive={isPositive} />
+        <KPICard label="Total Income"   value={formatCurrency(summary?.totalIncome ?? 0)}   color="#10B981" />
+        <KPICard label="Total Expenses" value={formatCurrency(summary?.totalExpenses ?? 0)} color="#F43F5E" />
+        <KPICard label="Net P&L"        value={formatCurrency(summary?.netPL ?? 0)}         color={isPos ? '#10B981' : '#F43F5E'} sub={`${summary?.margin ?? 0}% margin`} />
+        <KPICard label="P&L Margin"     value={`${summary?.margin ?? 0}%`}                  color={isPos ? '#10B981' : '#F43F5E'} />
       </div>
 
       {/* Charts */}
@@ -107,12 +115,12 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis dataKey="month" tick={{ fill:'#64748B', fontSize:11 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill:'#64748B', fontSize:11 }} axisLine={false} tickLine={false} tickFormatter={v => '$'+(v/1000).toFixed(0)+'k'} />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={<Tooltip_ />} />
                 <Bar dataKey="income"   name="Income"   fill="#0EA5E9" radius={[4,4,0,0]} />
                 <Bar dataKey="expenses" name="Expenses" fill="#EC4899" radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
-          ) : <p className="text-slate-500 text-sm text-center py-16">No monthly data yet</p>}
+          ) : <p className="text-slate-500 text-sm text-center py-16">No monthly data</p>}
         </div>
 
         <div className="card p-5">
@@ -122,14 +130,14 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={160}>
                 <PieChart>
                   <Pie data={breakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={2} dataKey="value">
-                    {breakdown.map((e,i) => <Cell key={i} fill={e.color} />)}
+                    {breakdown.map((e, i) => <Cell key={i} fill={e.color} />)}
                   </Pie>
-                  <Tooltip formatter={(v:any) => formatCurrency(Number(v))}
+                  <Tooltip formatter={(v: any) => formatCurrency(Number(v))}
                     contentStyle={{ background:'#0F0F1A', border:'1px solid rgba(255,255,255,0.07)', borderRadius:8, fontSize:11 }} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="space-y-1 mt-2">
-                {breakdown.slice(0,5).map(c => (
+                {breakdown.slice(0, 5).map(c => (
                   <div key={c.name} className="flex items-center justify-between text-xs">
                     <span className="flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full" style={{ background: c.color }} />
@@ -140,11 +148,10 @@ export default function DashboardPage() {
                 ))}
               </div>
             </>
-          ) : <p className="text-slate-500 text-sm text-center py-16">No expense data yet</p>}
+          ) : <p className="text-slate-500 text-sm text-center py-16">No expense data</p>}
         </div>
       </div>
 
-      {/* Net trend */}
       {trend.length > 1 && (
         <div className="card p-5">
           <p className="text-sm font-semibold text-white mb-4">Net P&L Trend</p>
@@ -159,7 +166,7 @@ export default function DashboardPage() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
               <XAxis dataKey="month" tick={{ fill:'#64748B', fontSize:11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill:'#64748B', fontSize:11 }} axisLine={false} tickLine={false} tickFormatter={v => '$'+(v/1000).toFixed(0)+'k'} />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<Tooltip_ />} />
               <Area type="monotone" dataKey="net" name="Net P&L" stroke="#8B5CF6" strokeWidth={2} fill="url(#netGrad)" dot={{ fill:'#8B5CF6', r:4 }} />
             </AreaChart>
           </ResponsiveContainer>
