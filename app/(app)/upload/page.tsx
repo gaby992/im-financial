@@ -8,153 +8,94 @@ import * as XLSX from 'xlsx';
 
 type UploadStatus = 'idle' | 'parsing' | 'preview' | 'uploading' | 'done' | 'error';
 
-// A single transaction line
-interface Transaction { date: string; type: string; name: string; memo: string; amount: number; }
-
-// A category with its transactions and total
-interface ParsedCategory {
-  category:     string;
-  type:         'income' | 'expense';
-  total:        number;
-  transactions: Transaction[];
-}
-
-// Flat row stored in Supabase
-interface FlatRow {
-  category:    string;
-  description: string;
-  amount:      number;
-  type:        'income' | 'expense';
-  txDate:      string;
-  txType:      string;
-  txName:      string;
-  txMemo:      string;
-}
+interface Transaction  { date: string; type: string; name: string; amount: number; }
+interface ParsedCategory { category: string; type: 'income' | 'expense'; total: number; transactions: Transaction[]; }
+interface FlatRow { category: string; description: string; amount: number; type: 'income' | 'expense'; }
 
 const COMPANY_OPTIONS: Exclude<Company,'All'>[] = ['IM','WSH','Abundant'];
 
 // ── QuickBooks P&L Detail Parser ──────────────────────────────────────────────
-// QB P&L Detail columns (typical export):
-//   A: Account/Category name (or blank for transactions)
-//   B: Date (for transactions) OR empty
-//   C: Transaction Type
-//   D: Num
-//   E: Name (vendor/customer)
-//   F: Memo/Description
-//   G or last non-empty col: Amount
+// Exact structure confirmed from real QB export:
+//   Row 1: "Profit and Loss Detail"
+//   Row 2: Company name
+//   Row 3: Date range
+//   Row 4: (empty)
+//   Row 5: Headers — Col A blank, Col B="Transaction date", Col C="Transaction type", Col D="Num", Col E="Name", Col H="Description", Col J="Amount"
 //
-// Category rows: text in col A, NO amount
-// Transaction rows: blank or date in A/B, amount in last col
-// Total rows: "Total <category>" text, has amount (skip — we compute ourselves)
+//   Category rows: text in Col A, Col B is EMPTY (no date)
+//   Transaction rows: Col B has a date (MM/DD/YYYY), Col J has the amount
+//   Total rows: Col A = "Total for [Category Name]", Col J has the total amount
 
 function parseQBDetail(rows: string[][]): ParsedCategory[] {
-  const categories: ParsedCategory[] = [];
-  let currentType:     'income' | 'expense' = 'expense';
-  let currentCategory: ParsedCategory | null = null;
+  const results: ParsedCategory[] = [];
+  let currentType: 'income' | 'expense' = 'expense';
+  let pendingCategory: string | null = null;
+  let pendingTransactions: Transaction[] = [];
+  let headerFound = false;
 
   for (const row of rows) {
     if (!row || row.every(c => !c || !String(c).trim())) continue;
-
-    // Normalize cells
     const cells = row.map(c => String(c ?? '').trim());
-    const colA  = cells[0] ?? '';
-    const colB  = cells[1] ?? '';
 
-    // ── Section headers ──────────────────────────────────────────────────────
-    if (/^income$/i.test(colA) || /ordinary income/i.test(colA)) {
-      currentType = 'income';
+    const colA = cells[0] ?? '';  // Category / section / total label
+    const colB = cells[1] ?? '';  // Transaction date (MM/DD/YYYY) for transaction rows
+    const colJ = cells[9] ?? '';  // Amount (Column J = index 9)
+
+    // Skip until we find the header row ("Transaction date" in column B)
+    if (!headerFound) {
+      if (/transaction date/i.test(colB)) headerFound = true;
       continue;
     }
-    if (/^(expenses?|cost of goods|other expense)/i.test(colA)) {
-      currentType = 'expense';
+
+    // ── Section type headers ──────────────────────────────────────────────────
+    if (/^income$/i.test(colA) && !colB) { currentType = 'income'; continue; }
+    if (/^(expenses?|cost of goods sold|other income|other expense)/i.test(colA) && !colB) {
+      currentType = 'expense'; continue;
+    }
+
+    // ── Skip section-level totals and net rows ────────────────────────────────
+    if (/^(total for income|total for expenses|total for cost of goods|net income|net ordinary|gross profit|total income|total expenses|other income|other expense)/i.test(colA)) continue;
+
+    // ── "Total for [Category]" row → commit this category ────────────────────
+    if (/^total for /i.test(colA)) {
+      const catName = colA.replace(/^total for /i, '').trim();
+      const raw = colJ.replace(/[$,\s]/g, '');
+      const amt = parseFloat(raw);
+      if (catName && catName === pendingCategory && !isNaN(amt) && Math.abs(amt) > 0) {
+        results.push({
+          category: catName,
+          type:     currentType,
+          total:    Math.abs(amt),
+          transactions: [...pendingTransactions],
+        });
+      }
+      pendingCategory = null;
+      pendingTransactions = [];
       continue;
     }
 
-    // ── Skip title / summary rows ─────────────────────────────────────────────
-    if (/^(profit.+loss|cash basis|accrual basis)/i.test(colA)) continue;
-    if (/^total\s+(income|expenses?|ordinary|gross|net)/i.test(colA)) continue;
-    if (/^(net\s|gross\s)/i.test(colA) && !cells.slice(1).some(c => c)) continue;
-
-    // ── Total row for current category — extract total, skip ─────────────────
-    if (/^total /i.test(colA)) {
-      const amt = parseAmount(cells);
-      if (currentCategory) {
-        if (amt !== null) currentCategory.total = amt;
-        if (currentCategory.transactions.length > 0 || currentCategory.total > 0) {
-          categories.push(currentCategory);
+    // ── Transaction row: date in Col B, amount in Col J ───────────────────────
+    const isDate = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(colB) || /^\d{4}-\d{2}-\d{2}$/.test(colB);
+    if (isDate) {
+      if (pendingCategory) {
+        const raw = colJ.replace(/[$,\s]/g, '');
+        const amt = parseFloat(raw);
+        if (!isNaN(amt) && Math.abs(amt) > 0) {
+          const name = cells[4] || cells[7] || '';  // Col E = Name, Col H = Description
+          pendingTransactions.push({ date: colB, type: cells[2] || '', name, amount: Math.abs(amt) });
         }
-        currentCategory = null;
       }
       continue;
     }
 
-    // ── Find amount in this row ──────────────────────────────────────────────
-    const amt = parseAmount(cells);
-
-    // ── Category header: has text in A, no amount (or amount but no date) ────
-    // We detect categories by: text in colA, AND it doesn't look like a date/type
-    const looksLikeCategory = colA &&
-      !isDate(colA) && !isDate(colB) &&
-      !/^(invoice|payment|deposit|credit memo|bill|check|journal|transfer|expense|refund)/i.test(colA) &&
-      amt === null;
-
-    if (looksLikeCategory) {
-      // Save previous if open
-      if (currentCategory && currentCategory.transactions.length > 0) {
-        categories.push(currentCategory);
-      }
-      currentCategory = { category: colA, type: currentType, total: 0, transactions: [] };
-      continue;
-    }
-
-    // ── Transaction row ───────────────────────────────────────────────────────
-    if (currentCategory && amt !== null && Math.abs(amt) > 0) {
-      // Figure out columns — QB Detail is usually:
-      // Col0=blank|category, Col1=Date, Col2=Type, Col3=Num, Col4=Name, Col5=Memo, Col6=Amount
-      // OR: Col0=Date, Col1=Type, Col2=Num, Col3=Name, Col4=Memo, Col5=Amount
-      let txDate = '', txType = '', txName = '', txMemo = '';
-
-      if (isDate(colA)) {
-        txDate = colA; txType = cells[1]; txName = cells[3] || cells[2]; txMemo = cells[4] || '';
-      } else if (isDate(colB)) {
-        txDate = colB; txType = cells[2]; txName = cells[4] || cells[3]; txMemo = cells[5] || '';
-      } else {
-        txDate = ''; txType = cells[1]; txName = cells[3] || colA; txMemo = cells[4] || '';
-      }
-
-      currentCategory.transactions.push({
-        date:   txDate,
-        type:   txType,
-        name:   txName,
-        memo:   txMemo,
-        amount: Math.abs(amt),
-      });
+    // ── Category header: text in Col A, Col B is empty, not a "Total" row ────
+    if (colA && !colB && !/^total/i.test(colA)) {
+      pendingCategory   = colA;
+      pendingTransactions = [];
     }
   }
 
-  // Push last open category
-  if (currentCategory && currentCategory.transactions.length > 0) {
-    categories.push(currentCategory);
-  }
-
-  // Compute totals from transactions where missing
-  for (const cat of categories) {
-    if (!cat.total) cat.total = cat.transactions.reduce((s, t) => s + t.amount, 0);
-  }
-
-  return categories.filter(c => c.total > 0);
-}
-
-function isDate(s: string): boolean {
-  return /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(s);
-}
-
-function parseAmount(cells: string[]): number | null {
-  for (let i = cells.length - 1; i >= 1; i--) {
-    const raw = cells[i].replace(/[$,\s]/g, '');
-    if (/^-?\d+(\.\d{1,2})?$/.test(raw)) return parseFloat(raw);
-  }
-  return null;
+  return results.filter(c => c.total > 0);
 }
 
 // Flatten categories → rows for Supabase
@@ -162,10 +103,10 @@ function flattenToRows(cats: ParsedCategory[]): FlatRow[] {
   const rows: FlatRow[] = [];
   for (const cat of cats) {
     if (cat.transactions.length === 0) {
-      rows.push({ category: cat.category, description: cat.category, amount: cat.total, type: cat.type, txDate: '', txType: '', txName: '', txMemo: '' });
+      rows.push({ category: cat.category, description: cat.category, amount: cat.total, type: cat.type });
     } else {
       for (const tx of cat.transactions) {
-        rows.push({ category: cat.category, description: tx.name || tx.memo || cat.category, amount: tx.amount, type: cat.type, txDate: tx.date, txType: tx.type, txName: tx.name, txMemo: tx.memo });
+        rows.push({ category: cat.category, description: tx.name || cat.category, amount: tx.amount, type: cat.type });
       }
     }
   }
@@ -174,13 +115,6 @@ function flattenToRows(cats: ParsedCategory[]): FlatRow[] {
 
 async function readAsBuffer(file: File): Promise<ArrayBuffer> {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target!.result as ArrayBuffer); r.onerror = rej; r.readAsArrayBuffer(file); });
-}
-
-function fileToSheetRows(buffer: ArrayBuffer, fileName: string): string[][] {
-  const wb   = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true });
-  const ws   = wb.Sheets[wb.SheetNames[0]];
-  const raw  = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][];
-  return raw;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -203,9 +137,11 @@ export default function UploadPage() {
     setFile(f); setStatus('parsing'); setErrorMsg('');
     try {
       const buf  = await readAsBuffer(f);
-      const rows = fileToSheetRows(buf, f.name);
-      const parsed = parseQBDetail(rows);
-      if (!parsed.length) throw new Error('No recognizable P&L data found. Make sure this is a QuickBooks Profit & Loss Detail export.');
+      const wb   = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const raw  = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, defval: '' }) as string[][];
+      const parsed = parseQBDetail(raw);
+      if (!parsed.length) throw new Error('No P&L data found. Make sure this is a QuickBooks Profit & Loss Detail export with the standard column layout.');
       setCats(parsed);
       setStatus('preview');
     } catch (e: any) { setErrorMsg(e.message); setStatus('error'); }
@@ -223,7 +159,7 @@ export default function UploadPage() {
     setStatus('uploading');
     try {
       const flatRows = flattenToRows(cats);
-      const res  = await fetch('/api/upload', {
+      const res = await fetch('/api/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ company: selectedCompany, period, filename: file?.name, rows: flatRows }),
@@ -249,15 +185,15 @@ export default function UploadPage() {
     <div className="max-w-3xl space-y-6 animate-slide-up">
       <div>
         <h1 className="text-2xl font-bold text-white">Upload Data</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Import QuickBooks Profit & Loss Detail (.xlsx)</p>
+        <p className="text-sm text-slate-500 mt-0.5">Import QuickBooks Profit & Loss Detail</p>
       </div>
 
       <div className="card p-4 flex gap-3 border-l-4" style={{ borderLeftColor: '#0EA5E9' }}>
         <Info size={16} className="text-brand-cyan flex-shrink-0 mt-0.5" />
         <div className="text-xs text-slate-400 space-y-0.5">
           <p className="font-semibold text-slate-300">What to upload:</p>
-          <p>• QuickBooks → Reports → <span className="text-white">Profit and Loss Detail</span> → Export Excel</p>
-          <p>• Includes individual transactions — click any category to see them after upload</p>
+          <p>• QuickBooks → Reports → <span className="text-white">Profit and Loss Detail</span> → Export to Excel (.xlsx)</p>
+          <p>• Expected totals: <span className="text-white">Income $32,150.66 · Expenses $21,037.96 · Net $11,112.70</span> for Jan 2026</p>
         </div>
       </div>
 
@@ -268,8 +204,7 @@ export default function UploadPage() {
           </div>
           <p className="text-xl font-bold text-white">Upload Successful!</p>
           <p className="text-sm text-slate-400">
-            {cats.length} categories · {flattenToRows(cats).length} transactions imported for&nbsp;
-            <span className="text-white font-medium">{selectedCompany}</span> · {new Date(period + '-01').toLocaleDateString('en-US',{month:'long',year:'numeric'})}
+            {cats.length} categories · {flattenToRows(cats).length} transactions · <span className="text-white font-medium">{selectedCompany}</span> · {period}
           </p>
           {batchId && <p className="text-xs text-slate-600 font-mono">Batch: {batchId}</p>}
           <button onClick={reset} className="btn-primary px-6">Upload Another Month</button>
@@ -322,7 +257,7 @@ export default function UploadPage() {
           {status === 'parsing' && (
             <div className="card p-12 flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-brand-violet/30 border-t-brand-violet rounded-full animate-spin" />
-              <p className="text-slate-400 text-sm">Parsing {file?.name}…</p>
+              <p className="text-slate-400 text-sm">Reading {file?.name}…</p>
             </div>
           )}
 
@@ -330,14 +265,13 @@ export default function UploadPage() {
             <div className="flex items-start gap-3 p-4 rounded-xl border border-negative/30 bg-negative/10 text-sm text-negative">
               <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
-              <button onClick={() => setErrorMsg('')} className="ml-auto"><X size={14} /></button>
+              <button onClick={() => { setErrorMsg(''); setStatus('idle'); }} className="ml-auto"><X size={14} /></button>
             </div>
           )}
 
-          {/* Preview — grouped by category, expandable */}
+          {/* Preview */}
           {status === 'preview' && (
             <div className="card overflow-hidden">
-              {/* Header */}
               <div className="flex items-center justify-between px-5 py-4 border-b border-bg-border">
                 <div>
                   <div className="flex items-center gap-2">
@@ -348,40 +282,31 @@ export default function UploadPage() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={reset} className="btn-secondary text-xs px-3 py-1.5">Cancel</button>
-                  <button onClick={handleConfirm} disabled={!period}
+                  <button onClick={handleConfirm} disabled={!period || status === 'uploading' as any}
                     className="btn-primary text-xs px-4 py-1.5 disabled:opacity-40 flex items-center gap-2">
-                    {(status as string) === 'uploading'
-                      ? <><span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
-                      : 'Confirm Import'}
+                    <CheckCircle size={13} /> Confirm Import
                   </button>
                 </div>
               </div>
 
-              {/* Summary strip */}
+              {/* Summary */}
               <div className="px-5 py-3 bg-bg-hover flex gap-6 text-xs border-b border-bg-border">
-                <span className="text-slate-500">Income: <span className="text-positive font-medium">{formatCurrency(totalInc)}</span> ({incCats.length} categories)</span>
-                <span className="text-slate-500">Expenses: <span className="text-negative font-medium">{formatCurrency(totalExp)}</span> ({expCats.length} categories)</span>
-                <span className="text-slate-500">Net: <span className={`font-medium ${totalInc-totalExp>=0?'text-positive':'text-negative'}`}>{formatCurrency(totalInc-totalExp)}</span></span>
+                <span className="text-slate-500">Income: <span className="text-positive font-semibold">{formatCurrency(totalInc)}</span> ({incCats.length} cats)</span>
+                <span className="text-slate-500">Expenses: <span className="text-negative font-semibold">{formatCurrency(totalExp)}</span> ({expCats.length} cats)</span>
+                <span className="text-slate-500">Net: <span className={`font-semibold ${totalInc-totalExp>=0?'text-positive':'text-negative'}`}>{formatCurrency(totalInc-totalExp)}</span></span>
               </div>
 
-              {/* Category list — expandable */}
               <div className="overflow-y-auto max-h-96">
-                {/* Income */}
                 {incCats.length > 0 && (
                   <>
                     <div className="px-4 py-2 text-xs font-bold text-positive bg-positive/5 uppercase tracking-wider">Income</div>
-                    {incCats.map(cat => (
-                      <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />
-                    ))}
+                    {incCats.map(cat => <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />)}
                   </>
                 )}
-                {/* Expenses */}
                 {expCats.length > 0 && (
                   <>
                     <div className="px-4 py-2 text-xs font-bold text-negative bg-negative/5 uppercase tracking-wider">Expenses</div>
-                    {expCats.map(cat => (
-                      <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />
-                    ))}
+                    {expCats.map(cat => <CategoryRow key={cat.category} cat={cat} expanded={expanded.has(cat.category)} onToggle={() => toggle(cat.category)} />)}
                   </>
                 )}
               </div>
@@ -400,7 +325,7 @@ function CategoryRow({ cat, expanded, onToggle }: { cat: ParsedCategory; expande
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-bg-hover transition-colors border-b border-bg-border/50 text-left">
         <div className="flex items-center gap-2">
           {cat.transactions.length > 0
-            ? expanded ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />
+            ? (expanded ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />)
             : <span className="w-3" />}
           <span className="text-sm font-medium text-white">{cat.category}</span>
           <span className="text-xs text-slate-600">{cat.transactions.length} txn{cat.transactions.length !== 1 ? 's' : ''}</span>
@@ -409,11 +334,10 @@ function CategoryRow({ cat, expanded, onToggle }: { cat: ParsedCategory; expande
           {formatCurrency(cat.total)}
         </span>
       </button>
-
       {expanded && cat.transactions.map((tx, i) => (
         <div key={i} className="flex items-center justify-between px-4 py-2 pl-10 border-b border-bg-border/30 bg-bg-base/30">
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-xs text-slate-400 truncate">{tx.name || tx.memo || '—'}</span>
+            <span className="text-xs text-slate-400 truncate">{tx.name || '—'}</span>
             {tx.date && <span className="text-xs text-slate-600">{tx.date} · {tx.type}</span>}
           </div>
           <span className="text-xs font-mono text-slate-300 ml-4 flex-shrink-0">{formatCurrency(tx.amount)}</span>
