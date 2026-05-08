@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     // ── Batches ───────────────────────────────────────────────────────────────
     let batchQuery = supabase
       .from('upload_batches')
-      .select('id, company_code, period_label, period_start, period_end, row_count, filename, uploaded_by, created_at')
+      .select('id, company_code, period_label, period_start, period_end, row_count, filename, uploaded_by, uploaded_at')
       .order('period_start', { ascending: false });
 
     if (company !== 'All') batchQuery = batchQuery.eq('company_code', company);

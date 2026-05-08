@@ -4,7 +4,7 @@ import { useApp } from '@/lib/context';
 import { formatCurrency, COMPANIES } from '@/lib/utils';
 import { Trash2, Users, Key, Bot, CheckCircle, RefreshCw } from 'lucide-react';
 
-interface Batch { id: string; company_code: string; period_label: string; filename: string; row_count: number; uploaded_by: string; created_at: string; }
+interface Batch { id: string; company_code: string; period_label: string; filename: string; row_count: number; uploaded_by: string; uploaded_at: string; }
 const USERS_LIST = [
   { username:'gabby',   role:'admin',  access:'Full access — upload, manage, insights' },
   { username:'chelsea', role:'viewer', access:'View all + post questions in Insights' },
@@ -70,7 +70,7 @@ export default function SettingsPage() {
                 <td className="text-slate-300">{b.period_label}</td>
                 <td className="text-slate-500 text-xs font-mono max-w-[180px] truncate">{b.filename}</td>
                 <td className="text-right font-mono text-sm text-slate-300">{b.row_count}</td>
-                <td className="text-slate-500 text-sm">{new Date(b.created_at).toLocaleDateString('en-US')}</td>
+                <td className="text-slate-500 text-sm">{new Date(b.uploaded_at).toLocaleDateString('en-US')}</td>
                 <td className="text-slate-400 text-sm">{b.uploaded_by}</td>
                 {isAdmin && <td><button onClick={() => handleDelete(b.id, b.period_label)} className="text-slate-600 hover:text-negative transition-colors p-1"><Trash2 size={14} /></button></td>}
               </tr>
